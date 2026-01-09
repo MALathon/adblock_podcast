@@ -141,6 +141,10 @@ Analyze this podcast transcript and identify all advertising segments. Ads typic
 - Product pitches and calls to action for EXTERNAL products (not the podcast itself)
 - Mid-roll ad breaks (often introduced with "We'll be right back" or similar)
 - Mentions of visiting sponsor websites or using coupon codes
+- Pre-roll ads at the very START of the episode (before any show content)
+
+IMPORTANT: Podcasts often start DIRECTLY with an ad before any intro music or host greeting.
+Look for phrases like "This episode is brought to you by..." at timestamp 0:00.
 
 NOT ADS (keep these):
 - Intro/outro music and show theme songs
