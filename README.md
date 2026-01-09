@@ -1,36 +1,38 @@
-# Ad-Free Podcast App
+# sv
 
-A locally-hosted podcast app that automatically removes ads from downloaded episodes using AI-powered detection.
+Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
 
-## Architecture
+## Creating a project
 
-- **Frontend**: SvelteKit + Svelte 5
-- **Backend**: Python (FastAPI)
-- **Processing**: Spark DGX via SSH
-  - Transcription: faster-whisper
-  - Ad Detection: Ollama (llama3.1:70b)
-  - Audio Cutting: ffmpeg
+If you're seeing this, you've probably already done this step. Congrats!
 
-## Setup
+```sh
+# create a new project in the current directory
+npx sv create
 
-1. Copy `.env.example` to `.env` and configure
-2. Install DGX dependencies (see below)
-3. Start the backend: `cd backend && uvicorn main:app`
-4. Start the frontend: `npm run dev`
-
-## DGX Setup
-
-```bash
-pip install faster-whisper
-mkdir -p ~/podcast_processor
+# create a new project in my-app
+npx sv create my-app
 ```
 
-## How It Works
+## Developing
 
-1. Search podcasts via iTunes API
-2. Select episode to download
-3. Backend sends audio to DGX for processing:
-   - Transcribe with Whisper
-   - Detect ads with LLM analysis
-   - Cut ad segments with ffmpeg
-4. Clean audio served back to frontend
+Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+
+```sh
+npm run dev
+
+# or start the server and open the app in a new browser tab
+npm run dev -- --open
+```
+
+## Building
+
+To create a production version of your app:
+
+```sh
+npm run build
+```
+
+You can preview the production build with `npm run preview`.
+
+> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
