@@ -214,7 +214,7 @@ JSON RESPONSE (ad segments only):"""
 
 def identify_ads_with_ollama(
     transcript: list[dict],
-    model: str = "llama3.1:70b",
+    model: str = "qwen3-coder:latest",
     ollama_host: str = "http://localhost:11434",
     chunk_duration: float = 300.0,
     podcast_context: Optional[dict] = None
@@ -527,8 +527,8 @@ def main():
     parser.add_argument("--whisper-model", "-w", default="base",
                         choices=["tiny", "base", "small", "medium", "large-v3"],
                         help="Whisper model size (default: base)")
-    parser.add_argument("--ollama-model", "-m", default="llama3.1:70b",
-                        help="Ollama model for ad detection (default: llama3.1:70b)")
+    parser.add_argument("--ollama-model", "-m", default="qwen3-coder:latest",
+                        help="Ollama model for ad detection (default: qwen3-coder:latest)")
     parser.add_argument("--keep-intermediate", "-k", action="store_true",
                         help="Keep intermediate files")
     parser.add_argument("--podcast-title", "-t",
