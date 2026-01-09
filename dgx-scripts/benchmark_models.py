@@ -116,7 +116,8 @@ def run_full_benchmark(audio_url: str) -> dict:
     # Download sample audio first
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         print(f"\nDownloading sample audio...")
-        response = requests.get(audio_url, stream=True, timeout=300)
+        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
+        response = requests.get(audio_url, stream=True, timeout=300, headers=headers)
         for chunk in response.iter_content(chunk_size=8192):
             tmp.write(chunk)
         audio_path = tmp.name
