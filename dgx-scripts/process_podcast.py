@@ -29,7 +29,10 @@ def download_audio(url: str, output_path: str) -> str:
     print(f"Downloading: {url}")
     start = time.time()
 
-    response = requests.get(url, stream=True, timeout=300)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    }
+    response = requests.get(url, stream=True, timeout=300, headers=headers)
     response.raise_for_status()
 
     with open(output_path, 'wb') as f:
@@ -50,7 +53,14 @@ def transcribe_audio(audio_path: str, whisper_model: str = "base") -> list[dict]
     print(f"Transcribing with whisper model: {whisper_model}")
     start = time.time()
 
-    model = WhisperModel(whisper_model, device="cuda", compute_type="float16")
+    # Try CUDA first, fallback to CPU if not available
+    try:
+        model = WhisperModel(whisper_model, device="cuda", compute_type="float16")
+        print("Using CUDA acceleration")
+    except ValueError:
+        print("CUDA not available, using CPU (this will be slower)")
+        model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
+
     segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
 
     transcript = []
@@ -163,10 +173,22 @@ def merge_overlapping_segments(segments: list[dict], buffer: float = 0.5) -> lis
     return merged
 
 
-def create_ffmpeg_filter(ad_segments: list[dict], total_duration: float) -> str:
+def create_ffmpeg_filter(
+    ad_segments: list[dict],
+    total_duration: float,
+    crossfade_ms: int = 50
+) -> str:
     """
-    Create ffmpeg filter_complex to remove ad segments.
-    Returns filter string for concatenating non-ad segments.
+    Create ffmpeg filter_complex to remove ad segments with crossfade.
+
+    Args:
+        ad_segments: List of {start, end} dicts for ad segments
+        total_duration: Total audio duration in seconds
+        crossfade_ms: Crossfade duration in milliseconds (default 50ms for subtle transition)
+
+    Returns filter string for concatenating non-ad segments with crossfade.
+    Note: We must re-encode (can't stream copy) because we're applying filters.
+    Using crossfade avoids jarring cuts when ads are removed.
     """
     if not ad_segments:
         return ""
@@ -187,20 +209,36 @@ def create_ffmpeg_filter(ad_segments: list[dict], total_duration: float) -> str:
     if not keep_segments:
         return ""
 
-    # Build filter_complex string
-    filter_parts = []
-    concat_inputs = []
+    # If only one segment, no crossfade needed
+    if len(keep_segments) == 1:
+        seg = keep_segments[0]
+        return f"[0:a]atrim=start={seg['start']:.3f}:end={seg['end']:.3f},asetpts=PTS-STARTPTS[out]"
 
+    # Build filter_complex with crossfade between segments
+    # Crossfade creates smoother transitions where ads were removed
+    crossfade_sec = crossfade_ms / 1000.0
+    filter_parts = []
+
+    # First, trim all segments
     for i, seg in enumerate(keep_segments):
-        # Create trim filter for each segment
         filter_parts.append(
             f"[0:a]atrim=start={seg['start']:.3f}:end={seg['end']:.3f},asetpts=PTS-STARTPTS[a{i}]"
         )
-        concat_inputs.append(f"[a{i}]")
 
-    # Concatenate all segments
-    concat_input_str = "".join(concat_inputs)
-    filter_parts.append(f"{concat_input_str}concat=n={len(keep_segments)}:v=0:a=1[out]")
+    # Chain crossfades: a0 x a1 -> t0, t0 x a2 -> t1, etc.
+    current_output = "[a0]"
+    for i in range(1, len(keep_segments)):
+        next_input = f"[a{i}]"
+        if i == len(keep_segments) - 1:
+            # Last crossfade outputs to [out]
+            output = "[out]"
+        else:
+            output = f"[t{i-1}]"
+
+        filter_parts.append(
+            f"{current_output}{next_input}acrossfade=d={crossfade_sec:.3f}:c1=tri:c2=tri{output}"
+        )
+        current_output = output if output != "[out]" else None
 
     return ";".join(filter_parts)
 

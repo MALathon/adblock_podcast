@@ -17,12 +17,29 @@ sys.path.insert(0, str(Path(__file__).parent))
 from process_podcast import process_podcast, transcribe_audio, identify_ads_with_ollama
 
 # Test configurations
-WHISPER_MODELS = ["tiny", "base", "small"]
-OLLAMA_MODELS = ["hermes3:8b", "hermes3:70b", "llama3.1:70b"]
+WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
+OLLAMA_MODELS = [
+    # Fast options
+    "hermes3:8b",
+    "huihui_ai/qwen3-abliterated:latest",
+    "huihui_ai/dolphin3-abliterated:latest",
+    # Balanced options
+    "gemma3:12b",
+    "huihui_ai/mistral-small-abliterated:24b",
+    "qwen3-coder:latest",
+    # High quality options
+    "hermes3:70b",
+    "llama3.1:70b",
+    "huihui_ai/llama3.3-abliterated:70b",
+    "qwen2.5-coder:32b",
+    "devstral-2:latest",
+    # Maximum quality (very slow to load)
+    # "deepseek-v3.1:latest",  # 404GB - uncomment if you have time
+]
 
-# Sample podcast URL (short episode with known ads for testing)
-# You can replace this with any podcast URL
-SAMPLE_URL = "https://www.podtrac.com/pts/redirect.mp3/pdst.fm/e/chrt.fm/track/524GE/traffic.megaphone.fm/VMP3891942786.mp3"
+# Sample podcast URL - Dungeons and Daddies "The Peach Pit (Season 3 After Show)"
+# ~92 min episode, hosted on Acast (likely has ad reads)
+SAMPLE_URL = "https://sphinx.acast.com/p/acast/s/dungeons-and-daddies/e/6940b888891c3619dc4b3b3e/media.mp3"
 
 
 def benchmark_transcription(audio_path: str) -> dict:
