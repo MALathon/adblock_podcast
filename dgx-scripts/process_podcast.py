@@ -21,7 +21,15 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-from faster_whisper import WhisperModel
+import torch
+
+# Try OpenAI whisper (GPU support) first, fallback to faster-whisper
+try:
+    import whisper
+    USE_OPENAI_WHISPER = True
+except ImportError:
+    from faster_whisper import WhisperModel
+    USE_OPENAI_WHISPER = False
 
 
 def download_audio(url: str, output_path: str) -> str:
@@ -47,29 +55,44 @@ def download_audio(url: str, output_path: str) -> str:
 
 def transcribe_audio(audio_path: str, whisper_model: str = "base") -> list[dict]:
     """
-    Transcribe audio using faster-whisper.
+    Transcribe audio using OpenAI whisper (with GPU) or faster-whisper (CPU fallback).
     Returns list of segments with start, end, and text.
     """
     print(f"Transcribing with whisper model: {whisper_model}")
     start = time.time()
 
-    # Try CUDA first, fallback to CPU if not available
-    try:
-        model = WhisperModel(whisper_model, device="cuda", compute_type="float16")
-        print("Using CUDA acceleration")
-    except ValueError:
-        print("CUDA not available, using CPU (this will be slower)")
-        model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
+    if USE_OPENAI_WHISPER:
+        # OpenAI whisper with GPU support
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Using OpenAI whisper on {device.upper()}")
+        model = whisper.load_model(whisper_model, device=device)
+        result = model.transcribe(audio_path, language="en")
 
-    segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
+        transcript = []
+        for segment in result["segments"]:
+            transcript.append({
+                "start": segment["start"],
+                "end": segment["end"],
+                "text": segment["text"].strip()
+            })
+    else:
+        # Faster-whisper fallback
+        try:
+            model = WhisperModel(whisper_model, device="cuda", compute_type="float16")
+            print("Using faster-whisper with CUDA")
+        except ValueError:
+            print("CUDA not available, using CPU (this will be slower)")
+            model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
 
-    transcript = []
-    for segment in segments:
-        transcript.append({
-            "start": segment.start,
-            "end": segment.end,
-            "text": segment.text.strip()
-        })
+        segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
+
+        transcript = []
+        for segment in segments:
+            transcript.append({
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text.strip()
+            })
 
     elapsed = time.time() - start
     print(f"Transcription complete in {elapsed:.1f}s ({len(transcript)} segments)")
@@ -214,7 +237,7 @@ JSON RESPONSE (ad segments only):"""
 
 def identify_ads_with_ollama(
     transcript: list[dict],
-    model: str = "llama3.1:70b",
+    model: str = "qwen3-coder:latest",
     ollama_host: str = "http://localhost:11434",
     chunk_duration: float = 300.0,
     podcast_context: Optional[dict] = None
@@ -527,8 +550,8 @@ def main():
     parser.add_argument("--whisper-model", "-w", default="base",
                         choices=["tiny", "base", "small", "medium", "large-v3"],
                         help="Whisper model size (default: base)")
-    parser.add_argument("--ollama-model", "-m", default="llama3.1:70b",
-                        help="Ollama model for ad detection (default: llama3.1:70b)")
+    parser.add_argument("--ollama-model", "-m", default="qwen3-coder:latest",
+                        help="Ollama model for ad detection (default: qwen3-coder:latest)")
     parser.add_argument("--keep-intermediate", "-k", action="store_true",
                         help="Keep intermediate files")
     parser.add_argument("--podcast-title", "-t",
