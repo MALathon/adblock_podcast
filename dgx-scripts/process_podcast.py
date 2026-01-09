@@ -115,19 +115,42 @@ def chunk_transcript(transcript: list[dict], chunk_duration: float = 300.0) -> l
 def analyze_chunk_for_ads(
     chunk: list[dict],
     model: str,
-    ollama_host: str
+    ollama_host: str,
+    podcast_context: Optional[dict] = None
 ) -> list[dict]:
     """Analyze a single transcript chunk for ads."""
     formatted = format_transcript_for_llm(chunk)
 
-    prompt = f"""You are an expert at identifying advertisements in podcast transcripts.
+    # Build context section if podcast info provided
+    context_section = ""
+    if podcast_context:
+        context_section = f"""
+PODCAST CONTEXT (use this to distinguish show content from ads):
+- Show: {podcast_context.get('title', 'Unknown')}
+- Description: {podcast_context.get('description', 'No description')}
+- Typical topics: Content related to the show description is NOT an ad.
+- Ads are promotional content for EXTERNAL products/services, not the show itself.
 
+"""
+
+    prompt = f"""You are an expert at identifying advertisements in podcast transcripts.
+{context_section}
 Analyze this podcast transcript and identify all advertising segments. Ads typically include:
 - Sponsor reads ("This episode is brought to you by...", "Thanks to our sponsor...")
 - Promo codes and discount offers
-- Product pitches and calls to action
+- Product pitches and calls to action for EXTERNAL products (not the podcast itself)
 - Mid-roll ad breaks (often introduced with "We'll be right back" or similar)
 - Mentions of visiting sponsor websites or using coupon codes
+- Pre-roll ads at the very START of the episode (before any show content)
+
+IMPORTANT: Podcasts often start DIRECTLY with an ad before any intro music or host greeting.
+Look for phrases like "This episode is brought to you by..." at timestamp 0:00.
+
+NOT ADS (keep these):
+- Intro/outro music and show theme songs
+- Host introductions and episode previews
+- Mentions of the podcast's own Patreon, merch, or upcoming episodes
+- Listener questions and show segments
 
 IMPORTANT: Return ONLY a valid JSON array of ad segments. Each segment should have "start" and "end" times in seconds.
 If no ads are found, return an empty array: []
@@ -165,8 +188,19 @@ JSON RESPONSE (ad segments only):"""
             ad_segments = json.loads(json_match.group())
             valid_segments = []
             for seg in ad_segments:
-                start_time = seg.get("start") or seg.get("start_time") or seg.get("begin")
-                end_time = seg.get("end") or seg.get("end_time") or seg.get("stop")
+                # Use explicit None checks - 0 is a valid timestamp!
+                start_time = seg.get("start")
+                if start_time is None:
+                    start_time = seg.get("start_time")
+                if start_time is None:
+                    start_time = seg.get("begin")
+
+                end_time = seg.get("end")
+                if end_time is None:
+                    end_time = seg.get("end_time")
+                if end_time is None:
+                    end_time = seg.get("stop")
+
                 if start_time is not None and end_time is not None:
                     valid_segments.append({
                         "start": float(start_time),
@@ -182,14 +216,26 @@ def identify_ads_with_ollama(
     transcript: list[dict],
     model: str = "llama3.1:70b",
     ollama_host: str = "http://localhost:11434",
-    chunk_duration: float = 300.0
+    chunk_duration: float = 300.0,
+    podcast_context: Optional[dict] = None
 ) -> list[dict]:
     """
     Use Ollama to identify ad segments in transcript.
     Chunks transcript into smaller pieces to avoid overwhelming the model.
+
+    Args:
+        transcript: List of {start, end, text} dicts
+        model: Ollama model name
+        ollama_host: Ollama API URL
+        chunk_duration: Seconds per chunk (default 5 min)
+        podcast_context: Optional dict with 'title' and 'description' to help
+                        distinguish show content from ads
+
     Returns list of {start, end} dicts for ad segments.
     """
     print(f"Analyzing transcript with Ollama model: {model}")
+    if podcast_context:
+        print(f"  Using podcast context: {podcast_context.get('title', 'Unknown')}")
     start = time.time()
 
     # Chunk transcript to avoid context length issues
@@ -202,7 +248,7 @@ def identify_ads_with_ollama(
         chunk_end = chunk[-1]["end"] if chunk else 0
         print(f"  Analyzing chunk {i+1}/{len(chunks)} ({chunk_start:.0f}s - {chunk_end:.0f}s)...")
 
-        chunk_ads = analyze_chunk_for_ads(chunk, model, ollama_host)
+        chunk_ads = analyze_chunk_for_ads(chunk, model, ollama_host, podcast_context)
         if chunk_ads:
             print(f"    Found {len(chunk_ads)} ads in chunk")
             all_ads.extend(chunk_ads)
@@ -383,10 +429,20 @@ def process_podcast(
     output_path: Optional[str] = None,
     whisper_model: str = "base",
     ollama_model: str = "llama3.1:70b",
-    keep_intermediate: bool = False
+    keep_intermediate: bool = False,
+    podcast_context: Optional[dict] = None
 ) -> dict:
     """
     Main pipeline: download, transcribe, identify ads, remove ads.
+
+    Args:
+        audio_source: URL or local path to podcast audio
+        output_path: Where to save cleaned audio
+        whisper_model: Whisper model size for transcription
+        ollama_model: Ollama model for ad detection
+        keep_intermediate: Keep temp files after processing
+        podcast_context: Optional dict with 'title' and 'description' to help
+                        distinguish show content from ads
 
     Returns dict with timing stats and results.
     """
@@ -394,6 +450,7 @@ def process_podcast(
         "source": audio_source,
         "whisper_model": whisper_model,
         "ollama_model": ollama_model,
+        "podcast_context": podcast_context,
         "timings": {},
         "ad_segments": [],
         "output_path": None
@@ -420,7 +477,11 @@ def process_podcast(
 
         # Step 3: Identify ads
         t0 = time.time()
-        ad_segments = identify_ads_with_ollama(transcript, ollama_model)
+        ad_segments = identify_ads_with_ollama(
+            transcript,
+            ollama_model,
+            podcast_context=podcast_context
+        )
         stats["timings"]["ad_detection"] = time.time() - t0
         stats["ad_segments"] = ad_segments
 
@@ -445,6 +506,9 @@ def print_stats(stats: dict):
     print("PROCESSING SUMMARY")
     print("="*60)
     print(f"Source: {stats['source']}")
+    if stats.get('podcast_context'):
+        ctx = stats['podcast_context']
+        print(f"Podcast: {ctx.get('title', 'Unknown')}")
     print(f"Whisper model: {stats['whisper_model']}")
     print(f"Ollama model: {stats['ollama_model']}")
     print(f"Transcript segments: {stats.get('transcript_segments', 'N/A')}")
@@ -467,15 +531,28 @@ def main():
                         help="Ollama model for ad detection (default: llama3.1:70b)")
     parser.add_argument("--keep-intermediate", "-k", action="store_true",
                         help="Keep intermediate files")
+    parser.add_argument("--podcast-title", "-t",
+                        help="Podcast title to help distinguish show content from ads")
+    parser.add_argument("--podcast-description", "-d",
+                        help="Podcast description to help identify show topics vs ads")
 
     args = parser.parse_args()
+
+    # Build podcast context if title or description provided
+    podcast_context = None
+    if args.podcast_title or args.podcast_description:
+        podcast_context = {
+            "title": args.podcast_title or "Unknown",
+            "description": args.podcast_description or "No description"
+        }
 
     stats = process_podcast(
         audio_source=args.audio,
         output_path=args.output,
         whisper_model=args.whisper_model,
         ollama_model=args.ollama_model,
-        keep_intermediate=args.keep_intermediate
+        keep_intermediate=args.keep_intermediate,
+        podcast_context=podcast_context
     )
 
     print_stats(stats)
