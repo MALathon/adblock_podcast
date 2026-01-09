@@ -188,8 +188,19 @@ JSON RESPONSE (ad segments only):"""
             ad_segments = json.loads(json_match.group())
             valid_segments = []
             for seg in ad_segments:
-                start_time = seg.get("start") or seg.get("start_time") or seg.get("begin")
-                end_time = seg.get("end") or seg.get("end_time") or seg.get("stop")
+                # Use explicit None checks - 0 is a valid timestamp!
+                start_time = seg.get("start")
+                if start_time is None:
+                    start_time = seg.get("start_time")
+                if start_time is None:
+                    start_time = seg.get("begin")
+
+                end_time = seg.get("end")
+                if end_time is None:
+                    end_time = seg.get("end_time")
+                if end_time is None:
+                    end_time = seg.get("stop")
+
                 if start_time is not None and end_time is not None:
                     valid_segments.append({
                         "start": float(start_time),
