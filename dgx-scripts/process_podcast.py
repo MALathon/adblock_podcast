@@ -138,18 +138,36 @@ JSON RESPONSE (ad segments only):"""
     llm_response = result.get("response", "[]")
 
     # Extract JSON from response (handle markdown code blocks)
-    json_match = re.search(r'\[.*?\]', llm_response, re.DOTALL)
+    # Use greedy match to get the full array
+    json_match = re.search(r'\[[\s\S]*\]', llm_response)
     if json_match:
         try:
             ad_segments = json.loads(json_match.group())
+
+            # Validate and normalize segment format
+            valid_segments = []
+            for seg in ad_segments:
+                # Handle various key formats LLMs might return
+                start_time = seg.get("start") or seg.get("start_time") or seg.get("begin")
+                end_time = seg.get("end") or seg.get("end_time") or seg.get("stop")
+
+                if start_time is not None and end_time is not None:
+                    valid_segments.append({
+                        "start": float(start_time),
+                        "end": float(end_time)
+                    })
+                else:
+                    print(f"Warning: Skipping malformed segment: {seg}")
+
             elapsed = time.time() - start
-            print(f"Found {len(ad_segments)} ad segments in {elapsed:.1f}s")
-            return ad_segments
-        except json.JSONDecodeError:
-            print(f"Warning: Could not parse LLM response as JSON: {llm_response[:200]}")
+            print(f"Found {len(valid_segments)} ad segments in {elapsed:.1f}s")
+            return valid_segments
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Warning: Could not parse LLM response: {e}")
+            print(f"Response was: {llm_response[:500]}")
             return []
 
-    print("Warning: No JSON array found in LLM response")
+    print(f"Warning: No JSON array found in LLM response: {llm_response[:200]}")
     return []
 
 
