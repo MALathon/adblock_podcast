@@ -85,19 +85,40 @@ def format_transcript_for_llm(transcript: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def identify_ads_with_ollama(
-    transcript: list[dict],
-    model: str = "llama3.1:70b",
-    ollama_host: str = "http://localhost:11434"
-) -> list[dict]:
+def chunk_transcript(transcript: list[dict], chunk_duration: float = 300.0) -> list[list[dict]]:
     """
-    Use Ollama to identify ad segments in transcript.
-    Returns list of {start, end} dicts for ad segments.
+    Split transcript into chunks of approximately chunk_duration seconds.
+    This prevents overwhelming the LLM with too much context.
     """
-    print(f"Analyzing transcript with Ollama model: {model}")
-    start = time.time()
+    if not transcript:
+        return []
 
-    formatted_transcript = format_transcript_for_llm(transcript)
+    chunks = []
+    current_chunk = []
+    chunk_start = 0.0
+
+    for seg in transcript:
+        current_chunk.append(seg)
+        # Start new chunk when we exceed duration
+        if seg["end"] - chunk_start >= chunk_duration:
+            chunks.append(current_chunk)
+            current_chunk = []
+            chunk_start = seg["end"]
+
+    # Don't forget the last chunk
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
+def analyze_chunk_for_ads(
+    chunk: list[dict],
+    model: str,
+    ollama_host: str
+) -> list[dict]:
+    """Analyze a single transcript chunk for ads."""
+    formatted = format_transcript_for_llm(chunk)
 
     prompt = f"""You are an expert at identifying advertisements in podcast transcripts.
 
@@ -115,7 +136,7 @@ Example output format:
 [{{"start": 125.5, "end": 187.2}}, {{"start": 542.0, "end": 610.5}}]
 
 TRANSCRIPT:
-{formatted_transcript}
+{formatted}
 
 JSON RESPONSE (ad segments only):"""
 
@@ -137,38 +158,58 @@ JSON RESPONSE (ad segments only):"""
     result = response.json()
     llm_response = result.get("response", "[]")
 
-    # Extract JSON from response (handle markdown code blocks)
-    # Use greedy match to get the full array
+    # Extract JSON from response
     json_match = re.search(r'\[[\s\S]*\]', llm_response)
     if json_match:
         try:
             ad_segments = json.loads(json_match.group())
-
-            # Validate and normalize segment format
             valid_segments = []
             for seg in ad_segments:
-                # Handle various key formats LLMs might return
                 start_time = seg.get("start") or seg.get("start_time") or seg.get("begin")
                 end_time = seg.get("end") or seg.get("end_time") or seg.get("stop")
-
                 if start_time is not None and end_time is not None:
                     valid_segments.append({
                         "start": float(start_time),
                         "end": float(end_time)
                     })
-                else:
-                    print(f"Warning: Skipping malformed segment: {seg}")
-
-            elapsed = time.time() - start
-            print(f"Found {len(valid_segments)} ad segments in {elapsed:.1f}s")
             return valid_segments
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"Warning: Could not parse LLM response: {e}")
-            print(f"Response was: {llm_response[:500]}")
+        except (json.JSONDecodeError, ValueError):
             return []
-
-    print(f"Warning: No JSON array found in LLM response: {llm_response[:200]}")
     return []
+
+
+def identify_ads_with_ollama(
+    transcript: list[dict],
+    model: str = "llama3.1:70b",
+    ollama_host: str = "http://localhost:11434",
+    chunk_duration: float = 300.0
+) -> list[dict]:
+    """
+    Use Ollama to identify ad segments in transcript.
+    Chunks transcript into smaller pieces to avoid overwhelming the model.
+    Returns list of {start, end} dicts for ad segments.
+    """
+    print(f"Analyzing transcript with Ollama model: {model}")
+    start = time.time()
+
+    # Chunk transcript to avoid context length issues
+    chunks = chunk_transcript(transcript, chunk_duration)
+    print(f"Split transcript into {len(chunks)} chunks of ~{chunk_duration/60:.0f} min each")
+
+    all_ads = []
+    for i, chunk in enumerate(chunks):
+        chunk_start = chunk[0]["start"] if chunk else 0
+        chunk_end = chunk[-1]["end"] if chunk else 0
+        print(f"  Analyzing chunk {i+1}/{len(chunks)} ({chunk_start:.0f}s - {chunk_end:.0f}s)...")
+
+        chunk_ads = analyze_chunk_for_ads(chunk, model, ollama_host)
+        if chunk_ads:
+            print(f"    Found {len(chunk_ads)} ads in chunk")
+            all_ads.extend(chunk_ads)
+
+    elapsed = time.time() - start
+    print(f"Found {len(all_ads)} total ad segments in {elapsed:.1f}s")
+    return all_ads
 
 
 def merge_overlapping_segments(segments: list[dict], buffer: float = 0.5) -> list[dict]:
