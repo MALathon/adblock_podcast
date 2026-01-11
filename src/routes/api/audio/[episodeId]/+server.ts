@@ -6,7 +6,22 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getProcessedEpisode, getEpisode } from '$lib/db/episodes';
 import { createReadStream, statSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, resolve, normalize } from 'path';
+
+// Define allowed base directory for processed audio files
+const ALLOWED_BASE_DIR = resolve(process.cwd(), 'processed');
+
+/**
+ * Validate that a file path is within the allowed directory
+ * Prevents path traversal attacks (e.g., ../../../etc/passwd)
+ */
+function isPathWithinAllowedDir(filePath: string): boolean {
+  const normalizedPath = normalize(resolve(filePath));
+  const normalizedBase = normalize(ALLOWED_BASE_DIR);
+
+  // Ensure the resolved path starts with the allowed base directory
+  return normalizedPath.startsWith(normalizedBase + '/') || normalizedPath === normalizedBase;
+}
 
 export const GET: RequestHandler = async ({ params, request }) => {
   const { episodeId } = params;
@@ -30,8 +45,14 @@ export const GET: RequestHandler = async ({ params, request }) => {
     });
   }
 
-  // Serve processed file
-  const filePath = join(process.cwd(), processed.processedPath);
+  // Construct and validate file path
+  const filePath = resolve(process.cwd(), processed.processedPath);
+
+  // Security check: Ensure path is within allowed directory
+  if (!isPathWithinAllowedDir(filePath)) {
+    console.error(`[Audio] Path traversal attempt blocked: ${processed.processedPath}`);
+    throw error(403, 'Access denied');
+  }
 
   if (!existsSync(filePath)) {
     throw error(404, 'Processed audio file not found');

@@ -3,6 +3,7 @@ import {
   validateString,
   validateUrl,
   validateInteger,
+  validateBoolean,
   ValidationError,
   isValidationError
 } from '$lib/utils/validation';
@@ -126,6 +127,58 @@ describe('validateUrl', () => {
 
     it('blocks IPv6 localhost', () => {
       expect(() => validateUrl('http://[::1]/api', 'url'))
+        .toThrow('url cannot target local or private IPv6 addresses');
+    });
+
+    it('blocks IPv6 link-local addresses', () => {
+      expect(() => validateUrl('http://[fe80::1]/api', 'url'))
+        .toThrow('url cannot target local or private IPv6 addresses');
+    });
+
+    it('blocks cloud metadata IP', () => {
+      // 169.254.169.254 is blocked by link-local check
+      expect(() => validateUrl('http://169.254.169.254/latest/meta-data/', 'url'))
+        .toThrow('url cannot target local or private addresses');
+    });
+
+    it('blocks cloud metadata hostnames', () => {
+      // metadata.google.internal triggers cloud metadata check first
+      expect(() => validateUrl('http://metadata.google.internal/api', 'url'))
+        .toThrow('url cannot target cloud metadata endpoints');
+    });
+
+    it('blocks internal domain suffixes', () => {
+      expect(() => validateUrl('http://server.internal/api', 'url'))
+        .toThrow('url cannot target internal network addresses');
+      expect(() => validateUrl('http://app.local/api', 'url'))
+        .toThrow('url cannot target internal network addresses');
+      expect(() => validateUrl('http://service.localhost/api', 'url'))
+        .toThrow('url cannot target internal network addresses');
+    });
+
+    it('blocks carrier-grade NAT ranges', () => {
+      expect(() => validateUrl('http://100.64.0.1/api', 'url'))
+        .toThrow('url cannot target local or private addresses');
+      expect(() => validateUrl('http://100.127.255.255/api', 'url'))
+        .toThrow('url cannot target local or private addresses');
+    });
+
+    it('blocks test-net addresses', () => {
+      expect(() => validateUrl('http://192.0.2.1/api', 'url'))
+        .toThrow('url cannot target local or private addresses');
+      expect(() => validateUrl('http://198.51.100.1/api', 'url'))
+        .toThrow('url cannot target local or private addresses');
+      expect(() => validateUrl('http://203.0.113.1/api', 'url'))
+        .toThrow('url cannot target local or private addresses');
+    });
+
+    it('blocks multicast addresses', () => {
+      expect(() => validateUrl('http://224.0.0.1/api', 'url'))
+        .toThrow('url cannot target local or private addresses');
+    });
+
+    it('blocks broadcast address', () => {
+      expect(() => validateUrl('http://255.255.255.255/api', 'url'))
         .toThrow('url cannot target local or private addresses');
     });
   });
@@ -172,6 +225,32 @@ describe('validateInteger', () => {
 
   it('validates within range', () => {
     expect(validateInteger(25, 'num', { min: 10, max: 50 })).toBe(25);
+  });
+});
+
+describe('validateBoolean', () => {
+  it('returns undefined for undefined when not required', () => {
+    expect(validateBoolean(undefined, 'flag')).toBeUndefined();
+  });
+
+  it('returns undefined for null when not required', () => {
+    expect(validateBoolean(null, 'flag')).toBeUndefined();
+  });
+
+  it('throws when required and undefined', () => {
+    expect(() => validateBoolean(undefined, 'flag', { required: true }))
+      .toThrow('flag is required');
+  });
+
+  it('validates boolean values', () => {
+    expect(validateBoolean(true, 'flag')).toBe(true);
+    expect(validateBoolean(false, 'flag')).toBe(false);
+  });
+
+  it('throws for non-boolean values', () => {
+    expect(() => validateBoolean('true', 'flag')).toThrow('flag must be a boolean');
+    expect(() => validateBoolean(1, 'flag')).toThrow('flag must be a boolean');
+    expect(() => validateBoolean({}, 'flag')).toThrow('flag must be a boolean');
   });
 });
 

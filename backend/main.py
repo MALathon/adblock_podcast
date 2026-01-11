@@ -5,7 +5,9 @@ Uses SQLite for job storage to work with multiple uvicorn workers.
 """
 
 import hashlib
+import logging
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,14 +20,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+# Configure logging for server-side error details
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 
 app = FastAPI(title="Ad-Free Podcast API")
 
-# CORS for SvelteKit frontend
+# CORS for SvelteKit frontend - configurable via environment
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[origin.strip() for origin in CORS_ORIGINS],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,6 +46,7 @@ app.add_middleware(
 DGX_HOST = os.getenv("DGX_HOST", "192.168.4.62")
 DGX_USER = os.getenv("DGX_USER", "mlifson")
 DGX_PASSWORD = os.getenv("DGX_PASSWORD", "")
+DGX_HOST_KEY_PATH = os.getenv("DGX_HOST_KEY_PATH", os.path.expanduser("~/.ssh/known_hosts"))
 PROCESSED_DIR = Path("processed")
 PROCESSED_DIR.mkdir(exist_ok=True)
 DB_PATH = Path("jobs.db")
@@ -125,9 +137,14 @@ class ProcessResponse(BaseModel):
 
 
 def get_ssh_client() -> paramiko.SSHClient:
-    """Create SSH connection to DGX."""
+    """Create SSH connection to DGX with proper host key verification."""
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # Load known hosts for proper host key verification (reject unknown hosts)
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    if os.path.exists(DGX_HOST_KEY_PATH):
+        client.load_host_keys(DGX_HOST_KEY_PATH)
+    else:
+        logger.warning(f"Known hosts file not found at {DGX_HOST_KEY_PATH}")
     client.connect(
         DGX_HOST,
         username=DGX_USER,
@@ -143,20 +160,43 @@ def generate_job_id(episode_id: str, audio_url: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:12]
 
 
+def _validate_shell_arg(value: str, field_name: str) -> str:
+    """Validate and sanitize shell arguments to prevent injection."""
+    # Block shell metacharacters that could enable command injection
+    # Allow common characters in podcast titles/URLs but block dangerous ones
+    dangerous_chars = re.compile(r'[`$;|&<>\\(){}\[\]\n\r\x00]')
+    if dangerous_chars.search(value):
+        raise ValueError(f"Invalid characters in {field_name}")
+    # Additional check: block command substitution patterns
+    if '$(' in value or '${' in value:
+        raise ValueError(f"Invalid pattern in {field_name}")
+    return value
+
+
 def process_on_dgx(job_id: str, audio_url: str, title: str, podcast_title: str):
     """Process audio on DGX in background (runs in thread pool)."""
     try:
         update_job(job_id, status="downloading", progress=10)
 
+        # Validate inputs to prevent command injection
+        try:
+            safe_audio_url = _validate_shell_arg(audio_url, "audio_url")
+            safe_title = _validate_shell_arg(title, "title")
+            safe_podcast_title = _validate_shell_arg(podcast_title, "podcast_title")
+        except ValueError as e:
+            logger.error(f"Input validation failed for job {job_id}: {e}")
+            update_job(job_id, status="error", error="Invalid input characters")
+            return
+
         # Connect to DGX
         client = get_ssh_client()
 
-        # Create processing command
+        # Create processing command using docker exec with explicit argument separation
         # Uses existing fda_mcp container (CUDA 13, faster-whisper pre-installed)
-        # Escape single quotes in shell arguments
-        safe_podcast_title = podcast_title.replace("'", "'\\''")
-        safe_title = title.replace("'", "'\\''")
-        safe_audio_url = audio_url.replace("'", "'\\''")
+        # Escape single quotes in shell arguments for the remote shell
+        safe_podcast_title = safe_podcast_title.replace("'", "'\\''")
+        safe_title = safe_title.replace("'", "'\\''")
+        safe_audio_url = safe_audio_url.replace("'", "'\\''")
 
         cmd = f"""docker exec fda_mcp python3 /workspace/podcast_processor/process_podcast.py \\
   '{safe_audio_url}' \\
@@ -174,7 +214,8 @@ def process_on_dgx(job_id: str, audio_url: str, title: str, podcast_title: str):
 
         if exit_status != 0:
             error = stderr.read().decode()
-            update_job(job_id, status="error", error=error[:500])
+            logger.error(f"DGX processing failed for job {job_id}: {error}")
+            update_job(job_id, status="error", error="Processing failed on remote server")
             client.close()
             return
 
@@ -192,7 +233,8 @@ def process_on_dgx(job_id: str, audio_url: str, title: str, podcast_title: str):
 
         if copy_exit != 0:
             error = stderr.read().decode()
-            update_job(job_id, status="error", error=f"Failed to copy from container: {error[:200]}")
+            logger.error(f"Container copy failed for job {job_id}: {error}")
+            update_job(job_id, status="error", error="Failed to retrieve processed file")
             client.close()
             return
 
@@ -204,7 +246,8 @@ def process_on_dgx(job_id: str, audio_url: str, title: str, podcast_title: str):
             client.exec_command(f"rm {host_path}")
         except FileNotFoundError:
             output = stderr.read().decode()
-            update_job(job_id, status="error", error=f"Processed file not found on host. Error: {output[:200]}")
+            logger.error(f"Processed file not found for job {job_id}: {output}")
+            update_job(job_id, status="error", error="Processed file not found")
             sftp.close()
             client.close()
             return
@@ -220,9 +263,11 @@ def process_on_dgx(job_id: str, audio_url: str, title: str, podcast_title: str):
         )
 
     except paramiko.SSHException as e:
-        update_job(job_id, status="error", error=f"SSH error: {str(e)}")
+        logger.error(f"SSH error for job {job_id}: {e}")
+        update_job(job_id, status="error", error="Connection error to processing server")
     except Exception as e:
-        update_job(job_id, status="error", error=str(e))
+        logger.exception(f"Unexpected error for job {job_id}: {e}")
+        update_job(job_id, status="error", error="An unexpected error occurred")
 
 
 @app.post("/process", response_model=ProcessResponse)
@@ -323,7 +368,8 @@ async def health_check():
         client.close()
         dgx_status = "connected"
     except Exception as e:
-        dgx_status = f"error: {str(e)[:50]}"
+        logger.warning(f"Health check DGX connection failed: {e}")
+        dgx_status = "error"
 
     # Count jobs in database
     with get_db() as conn:
