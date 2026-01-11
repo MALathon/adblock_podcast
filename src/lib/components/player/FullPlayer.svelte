@@ -1,6 +1,9 @@
 <script lang="ts">
   import { player } from '$lib/stores/player.svelte';
 
+  let dialogRef = $state<HTMLDivElement | null>(null);
+  let previouslyFocusedElement: HTMLElement | null = null;
+
   function formatTime(seconds: number): string {
     if (isNaN(seconds)) return '0:00';
     const hrs = Math.floor(seconds / 3600);
@@ -28,21 +31,69 @@
     }
   }
 
+  // Get all focusable elements within the dialog
+  function getFocusableElements(): HTMLElement[] {
+    if (!dialogRef) return [];
+    return Array.from(
+      dialogRef.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+    );
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       player.collapse();
+      return;
+    }
+
+    // Focus trap: keep Tab navigation within the dialog
+    if (e.key === 'Tab') {
+      const focusable = getFocusableElements();
+      if (focusable.length === 0) return;
+
+      const firstElement = focusable[0];
+      const lastElement = focusable[focusable.length - 1];
+
+      if (e.shiftKey && document.activeElement === firstElement) {
+        e.preventDefault();
+        lastElement.focus();
+      } else if (!e.shiftKey && document.activeElement === lastElement) {
+        e.preventDefault();
+        firstElement.focus();
+      }
     }
   }
+
+  // Focus management when dialog opens/closes
+  $effect(() => {
+    if (player.isExpanded && dialogRef) {
+      // Store previously focused element to restore later
+      previouslyFocusedElement = document.activeElement as HTMLElement;
+      // Focus the play button when dialog opens
+      const playButton = dialogRef.querySelector<HTMLElement>('.full-player__play-btn');
+      playButton?.focus();
+    }
+  });
+
+  $effect(() => {
+    if (!player.isExpanded && previouslyFocusedElement) {
+      // Restore focus when dialog closes
+      previouslyFocusedElement.focus();
+      previouslyFocusedElement = null;
+    }
+  });
 </script>
 
 {#if player.currentEpisode && player.isExpanded}
   <div
+    bind:this={dialogRef}
     class="full-player"
     onclick={handleBackdropClick}
     onkeydown={handleKeydown}
     role="dialog"
     aria-modal="true"
-    aria-label="Now playing"
+    aria-labelledby="full-player-title"
     tabindex="-1"
   >
     <div class="full-player__content">
@@ -65,7 +116,7 @@
       </div>
 
       <div class="full-player__info">
-        <h2 class="full-player__title">{player.currentEpisode.title}</h2>
+        <h2 id="full-player-title" class="full-player__title">{player.currentEpisode.title}</h2>
         <p class="full-player__podcast">{player.currentEpisode.podcastTitle}</p>
       </div>
 

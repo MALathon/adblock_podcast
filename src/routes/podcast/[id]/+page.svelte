@@ -150,13 +150,15 @@
 
     isQueueing = true;
     try {
-      for (const episodeId of selectedEpisodes) {
-        await fetch('/api/queue', {
+      // Batch all queue requests in parallel for better performance
+      const queuePromises = Array.from(selectedEpisodes).map((episodeId) =>
+        fetch('/api/queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ episodeId })
-        });
-      }
+        })
+      );
+      await Promise.all(queuePromises);
       selectedEpisodes = new Set();
       await fetchPodcast();
     } catch (e) {

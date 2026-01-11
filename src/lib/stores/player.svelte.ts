@@ -78,16 +78,16 @@ function createPlayer() {
     // Restore volume from localStorage
     const savedVolume = localStorage.getItem('player-volume');
     if (savedVolume) {
-      const v = parseFloat(savedVolume);
-      audioElement.volume = v;
-      state.volume = v;
+      const parsedVolume = parseFloat(savedVolume);
+      audioElement.volume = parsedVolume;
+      state.volume = parsedVolume;
     }
 
     const savedRate = localStorage.getItem('player-rate');
     if (savedRate) {
-      const r = parseFloat(savedRate);
-      audioElement.playbackRate = r;
-      state.playbackRate = r;
+      const parsedRate = parseFloat(savedRate);
+      audioElement.playbackRate = parsedRate;
+      state.playbackRate = parsedRate;
     }
   }
 
@@ -142,10 +142,10 @@ function createPlayer() {
 
     setVolume(volume: number) {
       if (!audioElement) return;
-      const v = Math.max(0, Math.min(1, volume));
-      audioElement.volume = v;
-      state.volume = v;
-      localStorage.setItem('player-volume', v.toString());
+      const clampedVolume = Math.max(0, Math.min(1, volume));
+      audioElement.volume = clampedVolume;
+      state.volume = clampedVolume;
+      localStorage.setItem('player-volume', clampedVolume.toString());
     },
 
     setPlaybackRate(rate: number) {

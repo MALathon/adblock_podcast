@@ -11,6 +11,9 @@ import { resolve, normalize } from 'path';
 // Define allowed base directory for processed audio files
 const ALLOWED_BASE_DIR = resolve(process.cwd(), 'processed');
 
+// Cache duration: 1 year in seconds (immutable processed audio files)
+const ONE_YEAR_IN_SECONDS = 31536000;
+
 /**
  * Validate that a file path is within the allowed directory
  * Prevents path traversal attacks (e.g., ../../../etc/passwd)
@@ -79,7 +82,7 @@ export const GET: RequestHandler = async ({ params, request }) => {
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize.toString(),
         'Content-Type': 'audio/mpeg',
-        'Cache-Control': 'public, max-age=31536000'
+        'Cache-Control': `public, max-age=${ONE_YEAR_IN_SECONDS}`
       }
     });
   }
@@ -92,7 +95,7 @@ export const GET: RequestHandler = async ({ params, request }) => {
       'Content-Length': fileSize.toString(),
       'Content-Type': 'audio/mpeg',
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'public, max-age=31536000'
+      'Cache-Control': `public, max-age=${ONE_YEAR_IN_SECONDS}`
     }
   });
 };

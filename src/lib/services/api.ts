@@ -6,6 +6,9 @@
 
 import { json, error as svelteError } from '@sveltejs/kit';
 
+// Cache duration constants
+const ONE_YEAR_IN_SECONDS = 31536000;
+
 /**
  * Create a successful JSON response
  */
@@ -84,7 +87,7 @@ export function audioResponse(
   const headers: Record<string, string> = {
     'Content-Type': 'audio/mpeg',
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'public, max-age=31536000'
+    'Cache-Control': `public, max-age=${ONE_YEAR_IN_SECONDS}`
   };
 
   if (isRange && start !== undefined && end !== undefined) {
