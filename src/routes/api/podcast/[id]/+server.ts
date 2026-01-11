@@ -75,7 +75,7 @@ function parseRssFeed(xml: string, podcast: Podcast): Episode[] {
   let itemMatch;
   let index = 0;
 
-  while ((itemMatch = itemRegex.exec(xml)) !== null && index < 50) {
+  while ((itemMatch = itemRegex.exec(xml)) !== null) {
     const itemContent = itemMatch[1];
 
     const title = extractXmlValue(itemContent, 'title');

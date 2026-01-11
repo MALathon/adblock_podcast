@@ -1,11 +1,13 @@
 """
 FastAPI backend for ad-free podcast processing.
 Handles communication with DGX Spark for audio processing.
+Uses SQLite for job storage to work with multiple uvicorn workers.
 """
 
-import asyncio
 import hashlib
 import os
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -35,9 +37,74 @@ DGX_USER = os.getenv("DGX_USER", "mlifson")
 DGX_PASSWORD = os.getenv("DGX_PASSWORD", "")
 PROCESSED_DIR = Path("processed")
 PROCESSED_DIR.mkdir(exist_ok=True)
+DB_PATH = Path("jobs.db")
 
-# In-memory job tracking
-jobs: dict[str, dict] = {}
+
+# SQLite job storage (shared across workers)
+def init_db():
+    """Initialize SQLite database for job tracking."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                episode_id TEXT,
+                audio_url TEXT,
+                status TEXT DEFAULT 'queued',
+                progress INTEGER DEFAULT 0,
+                processed_audio_url TEXT,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+
+
+@contextmanager
+def get_db():
+    """Get database connection with row factory."""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def get_job(job_id: str) -> Optional[dict]:
+    """Get job from database."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def update_job(job_id: str, **kwargs):
+    """Update job in database."""
+    if not kwargs:
+        return
+
+    with get_db() as conn:
+        sets = ", ".join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [job_id]
+        conn.execute(f"UPDATE jobs SET {sets} WHERE job_id = ?", values)
+        conn.commit()
+
+
+def create_job(job_id: str, episode_id: str, audio_url: str):
+    """Create new job in database."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO jobs (job_id, episode_id, audio_url, status, progress) VALUES (?, ?, ?, 'queued', 0)",
+            (job_id, episode_id, audio_url)
+        )
+        conn.commit()
+
+
+# Initialize database on module load
+init_db()
 
 
 class ProcessRequest(BaseModel):
@@ -76,34 +143,28 @@ def generate_job_id(episode_id: str, audio_url: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:12]
 
 
-async def process_on_dgx(job_id: str, audio_url: str, title: str, podcast_title: str):
-    """Process audio on DGX in background."""
+def process_on_dgx(job_id: str, audio_url: str, title: str, podcast_title: str):
+    """Process audio on DGX in background (runs in thread pool)."""
     try:
-        jobs[job_id]["status"] = "downloading"
-        jobs[job_id]["progress"] = 10
+        update_job(job_id, status="downloading", progress=10)
 
         # Connect to DGX
         client = get_ssh_client()
 
         # Create processing command
-        # Uses Docker with NGC PyTorch container for GPU whisper
-        cmd = f"""
-cd ~/podcast_processor && \\
-docker run --rm --gpus all --network host --ipc=host \\
-  -v ~/podcast_processor:/workspace \\
-  -v /tmp:/tmp \\
-  nvcr.io/nvidia/pytorch:25.12-py3 \\
-  bash -c "apt-get update -qq && apt-get install -qq -y ffmpeg > /dev/null 2>&1 && \\
-           pip install -q openai-whisper requests && \\
-           python /workspace/process_podcast.py \\
-             --url '{audio_url}' \\
-             --podcast-title '{podcast_title}' \\
-             --podcast-description '{title}' \\
-             --output /tmp/processed_{job_id}.mp3"
-"""
+        # Uses existing fda_mcp container (CUDA 13, faster-whisper pre-installed)
+        # Escape single quotes in shell arguments
+        safe_podcast_title = podcast_title.replace("'", "'\\''")
+        safe_title = title.replace("'", "'\\''")
+        safe_audio_url = audio_url.replace("'", "'\\''")
 
-        jobs[job_id]["status"] = "transcribing"
-        jobs[job_id]["progress"] = 30
+        cmd = f"""docker exec fda_mcp python3 /workspace/podcast_processor/process_podcast.py \\
+  '{safe_audio_url}' \\
+  --podcast-title '{safe_podcast_title}' \\
+  --podcast-description '{safe_title}' \\
+  --output /tmp/processed_{job_id}.mp3"""
+
+        update_job(job_id, status="transcribing", progress=30)
 
         # Execute on DGX
         stdin, stdout, stderr = client.exec_command(cmd, timeout=600)
@@ -113,27 +174,37 @@ docker run --rm --gpus all --network host --ipc=host \\
 
         if exit_status != 0:
             error = stderr.read().decode()
-            jobs[job_id]["status"] = "error"
-            jobs[job_id]["error"] = error[:500]
+            update_job(job_id, status="error", error=error[:500])
             client.close()
             return
 
-        jobs[job_id]["status"] = "cutting"
-        jobs[job_id]["progress"] = 80
+        update_job(job_id, status="cutting", progress=80)
 
-        # Download processed file
-        sftp = client.open_sftp()
-        remote_path = f"/tmp/processed_{job_id}.mp3"
+        # Copy file from container to host, then download via SFTP
+        container_path = f"/tmp/processed_{job_id}.mp3"
+        host_path = f"/home/mlifson/processed_{job_id}.mp3"
         local_path = PROCESSED_DIR / f"{job_id}.mp3"
 
+        # Copy from container to DGX host
+        copy_cmd = f"docker cp fda_mcp:{container_path} {host_path}"
+        stdin, stdout, stderr = client.exec_command(copy_cmd, timeout=60)
+        copy_exit = stdout.channel.recv_exit_status()
+
+        if copy_exit != 0:
+            error = stderr.read().decode()
+            update_job(job_id, status="error", error=f"Failed to copy from container: {error[:200]}")
+            client.close()
+            return
+
+        # Download from DGX host via SFTP
+        sftp = client.open_sftp()
         try:
-            sftp.get(remote_path, str(local_path))
+            sftp.get(host_path, str(local_path))
+            # Clean up host file
+            client.exec_command(f"rm {host_path}")
         except FileNotFoundError:
-            # File might be named differently, try original output path
-            output = stdout.read().decode()
-            # Parse output to find actual file path
-            jobs[job_id]["status"] = "error"
-            jobs[job_id]["error"] = f"Processed file not found. Output: {output[:200]}"
+            output = stderr.read().decode()
+            update_job(job_id, status="error", error=f"Processed file not found on host. Error: {output[:200]}")
             sftp.close()
             client.close()
             return
@@ -141,18 +212,17 @@ docker run --rm --gpus all --network host --ipc=host \\
         sftp.close()
         client.close()
 
-        jobs[job_id]["status"] = "complete"
-        jobs[job_id]["progress"] = 100
-        jobs[job_id]["processed_audio_url"] = f"/audio/{job_id}"
-
-        # TODO: Parse output for actual duration and ads removed
+        update_job(
+            job_id,
+            status="complete",
+            progress=100,
+            processed_audio_url=f"/audio/{job_id}"
+        )
 
     except paramiko.SSHException as e:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"] = f"SSH error: {str(e)}"
+        update_job(job_id, status="error", error=f"SSH error: {str(e)}")
     except Exception as e:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"] = str(e)
+        update_job(job_id, status="error", error=str(e))
 
 
 @app.post("/process", response_model=ProcessResponse)
@@ -173,24 +243,19 @@ async def process_episode(
             processed_audio_url=f"/audio/{job_id}"
         )
 
-    # Check if already processing
-    if job_id in jobs:
-        job = jobs[job_id]
+    # Check if already processing (in database)
+    existing_job = get_job(job_id)
+    if existing_job:
         return ProcessResponse(
             job_id=job_id,
-            status=job["status"],
-            progress=job.get("progress", 0),
-            processed_audio_url=job.get("processed_audio_url"),
-            error=job.get("error")
+            status=existing_job["status"],
+            progress=existing_job["progress"] or 0,
+            processed_audio_url=existing_job.get("processed_audio_url"),
+            error=existing_job.get("error")
         )
 
     # Start new job
-    jobs[job_id] = {
-        "status": "queued",
-        "progress": 0,
-        "episode_id": request.episode_id,
-        "audio_url": request.audio_url
-    }
+    create_job(job_id, request.episode_id, request.audio_url)
 
     background_tasks.add_task(
         process_on_dgx,
@@ -220,14 +285,14 @@ async def get_status(job_id: str):
             processed_audio_url=f"/audio/{job_id}"
         )
 
-    if job_id not in jobs:
+    job = get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = jobs[job_id]
     return ProcessResponse(
         job_id=job_id,
         status=job["status"],
-        progress=job.get("progress", 0),
+        progress=job["progress"] or 0,
         processed_audio_url=job.get("processed_audio_url"),
         error=job.get("error")
     )
@@ -260,8 +325,12 @@ async def health_check():
     except Exception as e:
         dgx_status = f"error: {str(e)[:50]}"
 
+    # Count jobs in database
+    with get_db() as conn:
+        job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
     return {
         "status": "ok",
         "dgx": dgx_status,
-        "jobs": len(jobs)
+        "jobs": job_count
     }

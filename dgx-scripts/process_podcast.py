@@ -32,6 +32,50 @@ except ImportError:
     USE_OPENAI_WHISPER = False
 
 
+def parse_timestamp(value) -> float | None:
+    """
+    Parse timestamp from various formats LLMs may return:
+    - "0.0s" -> 0.0
+    - "27.5s" -> 27.5
+    - 27.5 -> 27.5
+    - "27.5" -> 27.5
+    - "1:30" or "1:30.5" -> 90.0 or 90.5
+    """
+    if value is None:
+        return None
+
+    # Already a number
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    # String processing
+    if isinstance(value, str):
+        # Remove "s" or "sec" suffix
+        value = value.strip().lower()
+        value = re.sub(r'\s*(s|sec|seconds?)$', '', value)
+
+        # Handle MM:SS or MM:SS.ms format
+        if ':' in value:
+            parts = value.split(':')
+            try:
+                if len(parts) == 2:
+                    mins, secs = parts
+                    return float(mins) * 60 + float(secs)
+                elif len(parts) == 3:
+                    hours, mins, secs = parts
+                    return float(hours) * 3600 + float(mins) * 60 + float(secs)
+            except ValueError:
+                return None
+
+        # Try direct float conversion
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    return None
+
+
 def download_audio(url: str, output_path: str) -> str:
     """Download audio file from URL."""
     print(f"Downloading: {url}")
@@ -75,16 +119,14 @@ def transcribe_audio(audio_path: str, whisper_model: str = "base") -> list[dict]
                 "end": segment["end"],
                 "text": segment["text"].strip()
             })
+
+        elapsed = time.time() - start
+        print(f"Transcription complete in {elapsed:.1f}s ({len(transcript)} segments)")
     else:
         # Faster-whisper fallback
-        try:
-            model = WhisperModel(whisper_model, device="cuda", compute_type="float16")
-            print("Using faster-whisper with CUDA")
-        except ValueError:
-            print("CUDA not available, using CPU (this will be slower)")
-            model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
-
-        segments, info = model.transcribe(audio_path, beam_size=5, word_timestamps=True)
+        print("Using faster-whisper (CPU int8)")
+        model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
+        segments, info = model.transcribe(audio_path, beam_size=1, language="en")
 
         transcript = []
         for segment in segments:
@@ -94,8 +136,11 @@ def transcribe_audio(audio_path: str, whisper_model: str = "base") -> list[dict]
                 "text": segment.text.strip()
             })
 
-    elapsed = time.time() - start
-    print(f"Transcription complete in {elapsed:.1f}s ({len(transcript)} segments)")
+        elapsed = time.time() - start
+        duration = info.duration
+        rtf = duration / elapsed if elapsed > 0 else 0
+        print(f"Transcription complete in {elapsed:.1f}s ({rtf:.1f}x realtime, {len(transcript)} segments)")
+
     return transcript
 
 
@@ -211,7 +256,8 @@ JSON RESPONSE (ad segments only):"""
             ad_segments = json.loads(json_match.group())
             valid_segments = []
             for seg in ad_segments:
-                # Use explicit None checks - 0 is a valid timestamp!
+                # Try multiple key names LLMs might use
+                # NOTE: Can't use `or` because 0 is a valid timestamp but falsy!
                 start_time = seg.get("start")
                 if start_time is None:
                     start_time = seg.get("start_time")
@@ -224,11 +270,16 @@ JSON RESPONSE (ad segments only):"""
                 if end_time is None:
                     end_time = seg.get("stop")
 
-                if start_time is not None and end_time is not None:
+                # Parse timestamps (handles "0.0s", "1:30", etc.)
+                start_parsed = parse_timestamp(start_time)
+                end_parsed = parse_timestamp(end_time)
+
+                if start_parsed is not None and end_parsed is not None:
                     valid_segments.append({
-                        "start": float(start_time),
-                        "end": float(end_time)
+                        "start": start_parsed,
+                        "end": end_parsed
                     })
+                    print(f"    Parsed ad: {start_parsed:.1f}s - {end_parsed:.1f}s")
             return valid_segments
         except (json.JSONDecodeError, ValueError):
             return []
@@ -450,8 +501,8 @@ def remove_ads_with_ffmpeg(
 def process_podcast(
     audio_source: str,
     output_path: Optional[str] = None,
-    whisper_model: str = "base",
-    ollama_model: str = "llama3.1:70b",
+    whisper_model: str = "tiny",
+    ollama_model: str = "qwen3-coder:latest",
     keep_intermediate: bool = False,
     podcast_context: Optional[dict] = None
 ) -> dict:
