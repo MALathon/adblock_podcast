@@ -1,36 +1,56 @@
-# Dependencies
-node_modules/
-__pycache__/
-*.pyc
-.venv/
-venv/
+node_modules
 
-# Environment
-.env
-.env.local
-
-# Build outputs
-build/
-dist/
-.svelte-kit/
-
-# IDE
-.idea/
-.vscode/
-*.swp
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Processed audio files
-static/processed/
-*.mp3
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+*.egg-info/
+
+# Runtime data
+backend/jobs.db
+backend/processed/
+data/
+*.db
+
+# Test artifacts
+playwright-report/
+test-results/
+coverage/
+.nyc_output/
+
+# Research/benchmarking scripts (not production code)
+dgx-scripts/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # Logs
 *.log
-
-# Test artifacts
-.pytest_cache/
-.coverage
-htmlcov/
+npm-debug.log*
