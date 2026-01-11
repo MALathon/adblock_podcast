@@ -1,8 +1,6 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-
-// Backend URL (will be configurable via environment variable)
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
+import { success, badRequest, serverError } from '$lib/services/api';
+import { BACKEND_URL } from '$lib/utils/config';
 
 /**
  * Process episode to remove ads
@@ -17,7 +15,7 @@ export const POST: RequestHandler = async ({ request }) => {
     const { episodeId, audioUrl, title, podcastTitle } = body;
 
     if (!audioUrl) {
-      return json({ error: 'audioUrl is required' }, { status: 400 });
+      return badRequest('audioUrl is required');
     }
 
     // Try to call the Python backend
@@ -35,18 +33,18 @@ export const POST: RequestHandler = async ({ request }) => {
 
       if (response.ok) {
         const result = await response.json();
-        return json({
+        return success({
           processedAudioUrl: result.processed_audio_url,
           adsRemoved: result.ads_removed,
           duration: result.duration
         });
       }
-    } catch (backendError) {
+    } catch (_backendError) {
       console.log('Backend not available, returning original audio');
     }
 
     // Fallback: return original audio URL
-    return json({
+    return success({
       processedAudioUrl: audioUrl,
       adsRemoved: 0,
       duration: 0,
@@ -54,7 +52,7 @@ export const POST: RequestHandler = async ({ request }) => {
     });
   } catch (error) {
     console.error('Process error:', error);
-    return json({ error: 'Processing failed' }, { status: 500 });
+    return serverError('Processing failed');
   }
 };
 
@@ -66,20 +64,20 @@ export const GET: RequestHandler = async ({ url }) => {
   const episodeId = url.searchParams.get('episodeId');
 
   if (!episodeId) {
-    return json({ error: 'episodeId is required' }, { status: 400 });
+    return badRequest('episodeId is required');
   }
 
   try {
     const response = await fetch(`${BACKEND_URL}/status/${episodeId}`);
 
     if (response.ok) {
-      return json(await response.json());
+      return success(await response.json());
     }
   } catch {
     // Backend not available
   }
 
-  return json({
+  return success({
     status: 'unknown',
     progress: 0
   });

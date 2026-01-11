@@ -1,11 +1,20 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import type { Podcast } from '$lib/types';
   import { library } from '$lib/stores/library.svelte';
+  import Icon from '$lib/components/common/Icon.svelte';
+  import Spinner from '$lib/components/common/Spinner.svelte';
 
   let searchQuery = $state('');
   let podcasts = $state<Podcast[]>([]);
   let isSearching = $state(false);
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+  let searchInputRef: HTMLInputElement;
+
+  onMount(() => {
+    // Programmatic focus is more accessible than autofocus attribute
+    searchInputRef?.focus();
+  });
 
   async function search() {
     if (!searchQuery.trim()) {
@@ -48,17 +57,15 @@
 
 <div class="search-header">
   <a href="/" class="back-link" aria-label="Back to library">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
-    </svg>
+    <Icon name="arrow-left" size={24} />
   </a>
   <h1 class="search-title">Search</h1>
 </div>
 
 <div class="search-container">
-  <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-  </svg>
+  <span class="search-icon">
+    <Icon name="search" size={20} />
+  </span>
   <input
     type="search"
     class="search-input"
@@ -66,11 +73,11 @@
     value={searchQuery}
     oninput={handleInput}
     onkeydown={handleKeydown}
-    autofocus
+    bind:this={searchInputRef}
   />
   {#if isSearching}
     <div class="search-spinner">
-      <div class="spinner"></div>
+      <Spinner size="sm" />
     </div>
   {/if}
 </div>
@@ -98,6 +105,7 @@
           class="result-card__subscribe"
           onclick={() => subscribeToPodcast(podcast)}
           disabled={library.isSubscribed(podcast.id)}
+          aria-label={library.isSubscribed(podcast.id) ? 'Subscribed' : `Subscribe to ${podcast.title}`}
         >
           {#if library.isSubscribed(podcast.id)}
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -287,18 +295,5 @@
 
   .empty-state__hint {
     color: var(--text-muted);
-  }
-
-  .spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--bg-elevated);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
   }
 </style>

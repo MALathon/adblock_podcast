@@ -3,18 +3,7 @@
  */
 import { db } from './index';
 import type { Episode, ProcessedEpisode, EpisodeStatus } from '$lib/types';
-
-// Convert RFC 2822 date to ISO 8601 for proper sorting
-function toISODate(dateStr: string | undefined): string | null {
-  if (!dateStr) return null;
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr; // Return original if invalid
-    return date.toISOString();
-  } catch {
-    return dateStr;
-  }
-}
+import { toISODate } from '$lib/utils/format';
 
 // Store episodes from RSS feed
 export function upsertEpisode(episode: Episode): void {

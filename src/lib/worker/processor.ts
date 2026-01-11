@@ -11,11 +11,10 @@ import { getSubscription } from '$lib/db/subscriptions';
 import { existsSync, mkdirSync } from 'fs';
 import { writeFile } from 'fs/promises';
 import { join } from 'path';
+import { BACKEND_URL, PROCESSED_DIR, WORKER_CONFIG } from '$lib/utils/config';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
-const POLL_INTERVAL = 10000; // 10 seconds (faster polling for high parallelism)
-const PROCESSED_DIR = 'backend/processed';
-const MAX_CONCURRENT = 2; // Process 2 at a time (backend now runs SSH in threads)
+const { pollInterval: POLL_INTERVAL, maxConcurrent: MAX_CONCURRENT, statusCheckInterval } =
+  WORKER_CONFIG;
 
 let isRunning = false;
 let activeJobs = new Map<string, string>(); // episodeId -> jobId
@@ -84,7 +83,7 @@ async function processEpisode(episodeId: string): Promise<boolean> {
     const maxAttempts = 180; // 15 minutes max (5s * 180)
 
     while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise((resolve) => setTimeout(resolve, statusCheckInterval));
       attempts++;
 
       try {

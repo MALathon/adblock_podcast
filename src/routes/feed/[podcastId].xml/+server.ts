@@ -6,6 +6,10 @@ import type { RequestHandler } from './$types';
 import { getSubscription } from '$lib/db/subscriptions';
 import { getEpisodesForPodcast } from '$lib/db/episodes';
 import { statSync, existsSync } from 'fs';
+import { escapeXml } from '$lib/utils/xml';
+import { formatTime } from '$lib/utils/format';
+import { xmlResponse } from '$lib/services/api';
+import { API_CONFIG } from '$lib/utils/config';
 
 export const GET: RequestHandler = async ({ params, request }) => {
   const { podcastId } = params;
@@ -23,13 +27,7 @@ export const GET: RequestHandler = async ({ params, request }) => {
   const baseUrl = `${protocol}://${host}`;
 
   const rss = generateRssFeed(subscription, episodes, baseUrl);
-
-  return new Response(rss, {
-    headers: {
-      'Content-Type': 'application/rss+xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=300' // 5 minute cache
-    }
-  });
+  return xmlResponse(rss, API_CONFIG.feedCacheSeconds);
 };
 
 function generateRssFeed(
@@ -55,7 +53,7 @@ function generateRssFeed(
     .map((ep, index) => {
       const audioUrl = `${baseUrl}/api/audio/${encodeURIComponent(ep.id)}`;
       const pubDate = ep.pubDate ? new Date(ep.pubDate).toUTCString() : new Date().toUTCString();
-      const duration = ep.duration ? formatDuration(ep.duration) : '';
+      const duration = ep.duration ? formatTime(ep.duration) : '';
 
       // Get actual file size for enclosure
       let fileSize = 0;
@@ -108,22 +106,3 @@ function generateRssFeed(
 </rss>`;
 }
 
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  }
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}

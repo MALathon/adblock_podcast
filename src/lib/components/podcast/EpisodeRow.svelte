@@ -2,6 +2,8 @@
   import type { Episode } from '$lib/types';
   import { player } from '$lib/stores/player.svelte';
   import StatusBadge from '$lib/components/common/StatusBadge.svelte';
+  import Icon from '$lib/components/common/Icon.svelte';
+  import { formatDuration, formatDate } from '$lib/utils/format';
 
   interface Props {
     episode: Episode;
@@ -18,29 +20,6 @@
       await onRetry(episode.id);
     } finally {
       isRetrying = false;
-    }
-  }
-
-  function formatDuration(seconds?: number): string {
-    if (!seconds) return '';
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    if (hours > 0) {
-      return `${hours}h ${mins}m`;
-    }
-    return `${mins} min`;
-  }
-
-  function formatDate(dateStr?: string): string {
-    if (!dateStr) return '';
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric'
-      });
-    } catch {
-      return '';
     }
   }
 
@@ -64,19 +43,11 @@
 </script>
 
 <div class="episode-row" class:episode-row--playing={isCurrentEpisode}>
-  <button
-    class="episode-row__play"
-    onclick={playEpisode}
-    aria-label="Play episode"
-  >
+  <button class="episode-row__play" onclick={playEpisode} aria-label="Play episode">
     {#if isCurrentEpisode && player.isPlaying}
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-      </svg>
+      <Icon name="pause" size={20} />
     {:else}
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M8 5v14l11-7z"/>
-      </svg>
+      <Icon name="play" size={20} />
     {/if}
   </button>
 
@@ -156,6 +127,7 @@
     margin-bottom: var(--space-1);
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

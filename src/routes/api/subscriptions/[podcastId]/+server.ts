@@ -3,25 +3,22 @@
  * GET    /api/subscriptions/[podcastId] - Get subscription details
  * DELETE /api/subscriptions/[podcastId] - Unsubscribe
  */
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getSubscription, unsubscribe } from '$lib/db/subscriptions';
 import { getEpisodesForPodcast } from '$lib/db/episodes';
+import { success, notFound } from '$lib/services/api';
 
 export const GET: RequestHandler = async ({ params }) => {
   const { podcastId } = params;
   const subscription = getSubscription(podcastId);
 
   if (!subscription) {
-    return json({ error: 'Not found' }, { status: 404 });
+    return notFound('Subscription not found');
   }
 
   const episodes = getEpisodesForPodcast(podcastId);
 
-  return json({
-    subscription,
-    episodes
-  });
+  return success({ subscription, episodes });
 };
 
 export const DELETE: RequestHandler = async ({ params }) => {
@@ -29,8 +26,8 @@ export const DELETE: RequestHandler = async ({ params }) => {
   const deleted = unsubscribe(podcastId);
 
   if (!deleted) {
-    return json({ error: 'Not found' }, { status: 404 });
+    return notFound('Subscription not found');
   }
 
-  return json({ success: true });
+  return success({ success: true });
 };

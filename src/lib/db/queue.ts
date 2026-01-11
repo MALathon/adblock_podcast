@@ -2,7 +2,7 @@
  * Processing queue operations
  */
 import { db } from './index';
-import type { QueueItem, Episode } from '$lib/types';
+import type { QueueItem } from '$lib/types';
 
 export function addToQueue(episodeId: string, priority: number = 0, retry: boolean = false): void {
   const now = new Date().toISOString();

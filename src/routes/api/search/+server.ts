@@ -1,6 +1,6 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { Podcast } from '$lib/types';
+import { success, serverError } from '$lib/services/api';
 
 /**
  * Search iTunes Podcast API
@@ -10,7 +10,7 @@ export const GET: RequestHandler = async ({ url }) => {
   const query = url.searchParams.get('q');
 
   if (!query || query.trim().length === 0) {
-    return json([]);
+    return success([]);
   }
 
   try {
@@ -23,7 +23,7 @@ export const GET: RequestHandler = async ({ url }) => {
 
     if (!response.ok) {
       console.error('iTunes API error:', response.status);
-      return json([], { status: 500 });
+      return serverError('Search service unavailable');
     }
 
     const data = await response.json();
@@ -38,10 +38,10 @@ export const GET: RequestHandler = async ({ url }) => {
       genre: result.primaryGenreName
     }));
 
-    return json(podcasts);
+    return success(podcasts);
   } catch (error) {
     console.error('Search error:', error);
-    return json([], { status: 500 });
+    return serverError('Search failed');
   }
 };
 

@@ -1,12 +1,8 @@
 <script lang="ts">
   import { player } from '$lib/stores/player.svelte';
-
-  function formatTime(seconds: number): string {
-    if (isNaN(seconds)) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  }
+  import Icon from '$lib/components/common/Icon.svelte';
+  import Spinner from '$lib/components/common/Spinner.svelte';
+  import { formatTime } from '$lib/utils/format';
 
   function handleSeek(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -43,9 +39,7 @@
         onclick={() => player.skipBackward(15)}
         aria-label="Rewind 15 seconds"
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-        </svg>
+        <Icon name="skip-back" size={20} />
       </button>
 
       <button
@@ -54,15 +48,11 @@
         aria-label={player.isPlaying ? 'Pause' : 'Play'}
       >
         {#if player.isBuffering}
-          <div class="spinner"></div>
+          <Spinner size="md" color="white" />
         {:else if player.isPlaying}
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-          </svg>
+          <Icon name="pause" size={24} />
         {:else}
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
+          <Icon name="play" size={24} />
         {/if}
       </button>
 
@@ -71,9 +61,7 @@
         onclick={() => player.skipForward(30)}
         aria-label="Forward 30 seconds"
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>
-        </svg>
+        <Icon name="skip-forward" size={20} />
       </button>
     </div>
 
@@ -222,16 +210,4 @@
     cursor: pointer;
   }
 
-  .spinner {
-    width: 24px;
-    height: 24px;
-    border: 2px solid transparent;
-    border-top-color: white;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
 </style>

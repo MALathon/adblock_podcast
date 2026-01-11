@@ -27,11 +27,24 @@
       player.collapse();
     }
   }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      player.collapse();
+    }
+  }
 </script>
 
 {#if player.currentEpisode && player.isExpanded}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="full-player" onclick={handleBackdropClick}>
+  <div
+    class="full-player"
+    onclick={handleBackdropClick}
+    onkeydown={handleKeydown}
+    role="dialog"
+    aria-modal="true"
+    aria-label="Now playing"
+    tabindex="-1"
+  >
     <div class="full-player__content">
       <button
         class="full-player__collapse"
