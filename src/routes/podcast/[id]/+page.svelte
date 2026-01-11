@@ -37,6 +37,7 @@
 
   // Helper to get season from episode title
   function getEpisodeSeason(title: string): string | null {
+    // Match season indicators: "S1", "S01", "Season 1", "Season 01" (case-insensitive)
     const match = title.match(/S(\d+)|Season\s*(\d+)/i);
     return match ? match[1] || match[2] : null;
   }

@@ -21,6 +21,7 @@ export function extractXmlValue(xml: string, tag: string): string {
  * Extract attribute value from XML tag
  */
 export function extractXmlAttribute(xml: string, tag: string, attribute: string): string {
+  // Pattern: <tag [attrs] attribute="value" [attrs]> - captures the attribute value
   const regex = new RegExp(`<${tag}[^>]*${attribute}="([^"]*)"[^>]*>`, 'i');
   const match = xml.match(regex);
   return match ? match[1] : '';

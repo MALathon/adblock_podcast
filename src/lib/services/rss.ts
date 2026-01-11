@@ -72,6 +72,7 @@ export function parseRssFeed(xml: string, podcast: Podcast): Episode[] {
  * Extract podcast metadata from RSS feed
  */
 export function parsePodcastMetadata(xml: string): Partial<Podcast> {
+  // Match <channel>...</channel> including any nested content ([\s\S]*? = non-greedy any char)
   const channelMatch = xml.match(/<channel>([\s\S]*?)<\/channel>/);
   if (!channelMatch) return {};
 
