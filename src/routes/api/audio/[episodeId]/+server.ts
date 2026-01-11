@@ -6,7 +6,7 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getProcessedEpisode, getEpisode } from '$lib/db/episodes';
 import { createReadStream, statSync, existsSync } from 'fs';
-import { join, resolve, normalize } from 'path';
+import { resolve, normalize } from 'path';
 
 // Define allowed base directory for processed audio files
 const ALLOWED_BASE_DIR = resolve(process.cwd(), 'processed');
